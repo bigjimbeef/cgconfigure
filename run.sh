@@ -28,21 +28,54 @@ function loadValue
     return $value
 }
 
+# Parse the parameters from the options file, storing their values
+# for use at various points throughout the program.
+function parseOptions
+{
+    OPTIONS_FILE="options.conf"
+    REGEX='^([A-Za-z_]+) ([0-9])'
+    DEFAULT_KEY=""
+
+    while read line
+    do
+        key=$DEFAULT_KEY
+        if [[ ( $line =~ $REGEX ) ]]; then
+            key=${BASH_REMATCH[1]}
+            val=${BASH_REMATCH[2]}
+        fi
+
+        if [[ $key != $DEFAULT_KEY ]]; then
+            case $key in
+                hide_startup_message ) NO_STARTUP_MSG=$val;;
+                * ) break;;
+            esac
+        fi
+    done < $OPTIONS_FILE
+}
+
 
 function main
 {
-    echo "Welcome to cgconfigure."
-    echo -e "[Please edit params.conf to tweak basic parameter selection.]\n"
-
-    echo "Start configuration now?"
+    # Read the options file into memory.
+    parseOptions
 
     continue=false
-    select yn in "Yes" "No"; do
-        case $yn in
-            Yes ) continue=true; break;;
-            No ) exit;;
-        esac
-    done
+    if [[ -z $NO_STARTUP_MSG || $NO_STARTUP_MSG == "0" ]]; then
+        echo "Welcome to cgconfigure."
+        echo -e "[Please edit params.conf to tweak basic parameter selection.]\n"
+
+        echo "Start configuration now?"
+
+        select yn in "Yes" "No"; do
+            case $yn in
+                Yes ) continue=true; break;;
+                No ) exit;;
+            esac
+        done
+    else
+        continue=true
+    fi
+
 
     if [ continue ]; then
         echo "ASDIOHASDOIJ"
