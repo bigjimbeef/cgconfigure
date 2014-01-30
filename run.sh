@@ -9,8 +9,12 @@
 # palatable than just repeatedly editing and rebooting.
 #
 
-# $0        - file name
-# $1        - value
+# Error codes.
+PARSE_ERROR=1
+SUCCESS=42
+
+# $0 - file name
+# $1 - value
 function saveValue
 {
     DATA_DIR="data"
@@ -19,8 +23,8 @@ function saveValue
     echo $2 > $filePath
 }
 
-# $0        - file name
-# return    - value
+# $0 - file name
+# return - value
 function loadValue
 {
     filePath=$0/$1
@@ -53,11 +57,74 @@ function parseOptions
     done < $OPTIONS_FILE
 }
 
+# Parser for the config file.
+# Will catch basic syntax errors and exit appropriately.
+function parseParams
+{
+    PARAMS_FILE="params.conf"
+    COMMENT_REGEX='^#'
+    NAME_REGEX='^([A-Za-z_]+)$'
+    OPTION_REGEX='([A-Za-z]+):[ ]*([0-9]*)$'
+    OPEN_SCOPE_REGEX='^\{$'
+    CLOSE_SCOPE_REGEX='^\}$'
+
+    # Declare the data map.
+    declare -A paramData
+
+    currentParam=""
+    inParam=false
+    lineNum=0
+    while read line
+    do
+        lineNum=$((lineNum+1))
+
+        # Ignore comments.
+        [[ $line =~ $COMMENT_REGEX ]] && \
+            continue
+
+        # Scope comprehension.
+        [[ $line =~ $OPEN_SCOPE_REGEX ]] && \
+            inParam=true
+        [[ $line =~ $CLOSE_SCOPE_REGEX ]] && \
+            inParam=false
+
+        if [[ $line =~ $NAME_REGEX ]]; then
+            if ! $inParam; then
+                name=${BASH_REMATCH[1]}
+                currentParam=$name
+            else
+                echo "Error in $PARAMS_FILE: Mismatched braces near line $lineNum!"
+                exit $PARSE_ERROR
+            fi
+        elif [[ $line =~ $OPTION_REGEX ]]; then
+            if $inParam; then
+                key=${BASH_REMATCH[1]}
+                val=${BASH_REMATCH[2]}
+
+                mapKey=$currentParam:$key
+                paramData[$mapKey]=$val
+            else
+                echo "Error in $PARAMS_FILE: Mismatched braces near line $lineNum!"
+                exit $PARSE_ERROR
+            fi
+        fi
+    done < $PARAMS_FILE
+}
+
+# $0 - param name
+# $1 - param property (e.g. min/max)
+function getDataParam
+{
+    
+}
 
 function main
 {
     # Read the options file into memory.
     parseOptions
+
+    # Parse the default parameters from the config file.
+    parseParams
 
     continue=false
     if [[ -z $NO_STARTUP_MSG || $NO_STARTUP_MSG == "0" ]]; then
@@ -76,11 +143,12 @@ function main
         continue=true
     fi
 
-
     if [ continue ]; then
-        echo "ASDIOHASDOIJ"
+        echo "TODO: The actual program."
     fi
 }
 
 # Execute the main function.
 main
+
+exit $SUCCESS
