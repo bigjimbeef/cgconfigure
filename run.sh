@@ -11,6 +11,7 @@
 
 # Error codes.
 PARSE_ERROR=1
+NO_CGMINER=2
 SUCCESS=42
 
 # Declare the data map for parsing parameters from the config file.
@@ -40,21 +41,21 @@ function loadValue
 function parseOptions
 {
     OPTIONS_FILE="options.conf"
-    REGEX='^([A-Za-z_]+) ([0-9])'
-    DEFAULT_KEY=""
+    REGEX='^([A-Za-z_]+) ([0-9|a-z/]+)'
 
     while read line
     do
-        key=$DEFAULT_KEY
+        unset key
         if [[ ( $line =~ $REGEX ) ]]; then
             key=${BASH_REMATCH[1]}
             val=${BASH_REMATCH[2]}
         fi
 
-        if [[ $key != $DEFAULT_KEY ]]; then
+        if [ -n $key ]; then
             case $key in
                 hide_startup_message ) NO_STARTUP_MSG=$val;;
-                * ) break;;
+                cgminer_install_dir ) CGMINER_DIR=$val;;
+                * ) ;;
             esac
         fi
     done < $OPTIONS_FILE
@@ -71,7 +72,7 @@ function parseParams
     OPEN_SCOPE_REGEX='^\{$'
     CLOSE_SCOPE_REGEX='^\}$'
 
-   currentParam=""
+    currentParam=""
     inParam=false
     lineNum=0
     while read line
@@ -123,6 +124,35 @@ function main
 {
     # Read the options file into memory.
     parseOptions
+
+    # At this point, we should have a cgminer install dir set.
+    foundCgMiner=false
+    if [[ -z $CGMINER_DIR ]]; then
+        echo "Warning: no cgminer config file supplied! Will attempt to find automatically..."
+    else
+        # Check this is the install dir.
+        if $($CGMINER_DIR/./cgminer --version >/dev/null 2>&1); then
+            foundCgMiner=true
+        else
+            echo "Warning: cgminer install dir set incorrectly in config file."
+        fi
+    fi
+
+    # Last ditch attempt to auto-find cgminer with type.
+    if ! $foundCgMiner; then
+        REGEX='is ([a-z/]+)'
+
+        cgminerDir=$(type cgminer) && \
+            [[ $cgminerDir =~ $REGEX ]] && \
+                CGMINER_DIR=${BASH_REMATCH[1]}
+    fi
+
+    if [[ -z $CGMINER_DIR ]]; then
+        echo "Error: Unable to locate cgminer. Please check config file and ensure it is installed."
+        exit $NO_CGMINER
+    fi
+
+    echo "cgminer install found at $CGMINER_DIR"
 
     # Parse the default parameters from the config file.
     parseParams
