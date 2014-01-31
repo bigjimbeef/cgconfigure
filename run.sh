@@ -13,6 +13,9 @@
 PARSE_ERROR=1
 SUCCESS=42
 
+# Declare the data map for parsing parameters from the config file.
+declare -A paramData
+
 # $0 - file name
 # $1 - value
 function saveValue
@@ -68,10 +71,7 @@ function parseParams
     OPEN_SCOPE_REGEX='^\{$'
     CLOSE_SCOPE_REGEX='^\}$'
 
-    # Declare the data map.
-    declare -A paramData
-
-    currentParam=""
+   currentParam=""
     inParam=false
     lineNum=0
     while read line
@@ -101,7 +101,7 @@ function parseParams
                 key=${BASH_REMATCH[1]}
                 val=${BASH_REMATCH[2]}
 
-                mapKey=$currentParam:$key
+                mapKey=$currentParam-$key
                 paramData[$mapKey]=$val
             else
                 echo "Error in $PARAMS_FILE: Mismatched braces near line $lineNum!"
@@ -111,11 +111,12 @@ function parseParams
     done < $PARAMS_FILE
 }
 
-# $0 - param name
-# $1 - param property (e.g. min/max)
-function getDataParam
+# $1 - param name
+# $2 - param property (e.g. min/max)
+function getDatum
 {
-    
+    assembledKey=$1-$2
+    echo ${paramData[$assembledKey]}
 }
 
 function main
@@ -125,6 +126,11 @@ function main
 
     # Parse the default parameters from the config file.
     parseParams
+
+    # TODO: REMOVE
+    # Testing getDatum
+    val=$(getDatum gpu_engine min)
+    echo Value: $val
 
     continue=false
     if [[ -z $NO_STARTUP_MSG || $NO_STARTUP_MSG == "0" ]]; then
@@ -151,4 +157,5 @@ function main
 # Execute the main function.
 main
 
+# Great success.
 exit $SUCCESS
