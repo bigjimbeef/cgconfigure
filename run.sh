@@ -9,10 +9,13 @@
 # palatable than just repeatedly editing and rebooting.
 #
 
-# Error codes.
+# Exit codes.
 PARSE_ERROR=1
 NO_CGMINER=2
+CGMINER_NO_PARAM=3
+
 SUCCESS=42
+
 
 # Declare the data map for parsing parameters from the config file.
 declare -A paramData
@@ -41,7 +44,7 @@ function loadValue
 function parseOptions
 {
     OPTIONS_FILE="options.conf"
-    REGEX='^([A-Za-z_]+) ([0-9|a-z/]+)'
+    REGEX='^([A-Za-z_]+) ([0-9|a-zA-Z/:\+.]+)'
 
     while read line
     do
@@ -55,6 +58,11 @@ function parseOptions
             case $key in
                 hide_startup_message ) NO_STARTUP_MSG=$val;;
                 cgminer_install_dir ) CGMINER_DIR=$val;;
+                cgminer_api_port ) CGMINER_API_PORT=$val;;
+                cgminer_url ) CGMINER_URL=$val;;
+                cgminer_user ) CGMINER_USER=$val;;
+                cgminer_pass ) CGMINER_PASS=$val;;
+                tc_timeout ) TC_TIMEOUT=$val;;
                 * ) ;;
             esac
         fi
@@ -120,6 +128,100 @@ function getDatum
     echo ${paramData[$assembledKey]}
 }
 
+# Determine whether or not the cgminer instance is running.
+function checkActive
+{
+    #
+    # TODO: THIS NEEDS CHECKING!
+    #
+    #   Seems to return true for anything.
+    #
+    echo "{ \"command\":\"STATUS\" }" | nc 127.0.0.1 $CGMINER_API_PORT >/dev/null 2>&1
+}
+
+# Start cgminer for tweaking settings.
+# $1 - Setting name
+# $2 - Setting value
+function startCgMiner
+{
+    case $1 in
+        tc ) setting_key="thread-concurrency";;
+        eng ) setting_key="gpu-engine";;
+        mem ) setting_key="gpu-memclock";;
+        * ) break;;
+    esac
+    setting_val=$2
+
+    if [[ -z $setting_key || -z $setting_val ]]; then
+        echo "Error: no settings supplied for cgminer to tweak!";
+        exit $CGMINER_NO_PARAM
+    fi
+
+    CGMINER_CONNECTION="-o $CGMINER_URL -O $CGMINER_USER:$CGMINER_PASS"
+
+    # Start the cgminer instance.
+    nohup $CGMINER_DIR/./cgminer --scrypt $CGMINER_CONNECTION --$setting_key $setting_val --api-listen >/dev/null 2>/dev/null &
+}
+
+function getCurrentTime
+{
+    current=$(date +%s)
+    echo $current
+}
+
+function getTargetTime
+{
+    current=$(getCurrentTime)
+    target=$(($current+$TC_TIMEOUT))
+    echo $target
+}
+
+function tuneThreadConcurrency
+{
+    minTC=$(getDatum thread_concurrency min)
+    maxTC=$(getDatum thread_concurrency max)
+    stepTC=$(getDatum thread_concurrency step)
+    currentTC=$minTC
+    lastTC=$currentTC
+
+    while sleep 1; do
+        echo "Attempting to start with TC $currentTC"
+        startCgMiner tc $currentTC
+        active=0
+
+        targetTime=$(getTargetTime)
+        while sleep 1; do
+            if [[ $(getCurrentTime) -lt $targetTime ]]; then
+                if checkActive; then
+                    echo "cgminer starts with TC $currentTC"
+
+                    # Kill the cgminer process, and wait until it exits.
+                    kill $! >/dev/null 2>&1
+                    while pgrep cgminer >/dev/null; do
+                        sleep 1
+                    done
+                    active=1
+                    break;
+                fi
+            else
+                break;
+            fi
+        done
+
+        if [[ $active -eq 0 ]]; then
+            break;
+        fi
+        lastTC=$currentTC
+
+        currentTC=$((currentTC+$stepTC))
+        if [[ $lastTC -ge $maxTC ]]; then
+            break;
+        fi
+    done
+
+    echo "TC: $lastTC"
+}
+
 function main
 {
     # Read the options file into memory.
@@ -157,11 +259,6 @@ function main
     # Parse the default parameters from the config file.
     parseParams
 
-    # TODO: REMOVE
-    # Testing getDatum
-    val=$(getDatum gpu_engine min)
-    echo Value: $val
-
     continue=false
     if [[ -z $NO_STARTUP_MSG || $NO_STARTUP_MSG == "0" ]]; then
         echo "Welcome to cgconfigure."
@@ -180,7 +277,7 @@ function main
     fi
 
     if [ continue ]; then
-        echo "TODO: The actual program."
+        tuneThreadConcurrency
     fi
 }
 
