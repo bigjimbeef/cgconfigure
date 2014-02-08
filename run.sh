@@ -13,9 +13,15 @@
 PARSE_ERROR=1
 NO_CGMINER=2
 CGMINER_NO_PARAM=3
-
 SUCCESS=42
 
+# Warnings.
+NO_START="NULL"
+
+# For starting cgminer.
+export DISPLAY=:0
+export GPU_MAX_ALLOC_PERCENT=100
+export GPU_USE_SYNC_OBJECTS=1
 
 # Declare the data map for parsing parameters from the config file.
 declare -A paramData
@@ -128,15 +134,21 @@ function getDatum
     echo ${paramData[$assembledKey]}
 }
 
-# Determine whether or not the cgminer instance is running.
-function checkActive
+# Get the hash rate of the zeroth GPU, for checking results.
+function getHashRate
 {
-    #
-    # TODO: THIS NEEDS CHECKING!
-    #
-    #   Seems to return true for anything.
-    #
-    echo "{ \"command\":\"STATUS\" }" | nc 127.0.0.1 $CGMINER_API_PORT >/dev/null 2>&1
+    MHASH_REGEX='\"MHS av\":([0-9]+.[0-9][0-9])'
+    response=`echo "{ \"command\":\"gpu\", \"parameter\":\"0\" }" | nc 127.0.0.1 $CGMINER_API_PORT`
+
+    mhash=0
+    [[ $response =~ $MHASH_REGEX ]] && \
+        mhash=${BASH_REMATCH[1]}
+
+    if (( $(echo "$mhash == 0" | bc -l) )); then
+        echo $NO_START
+    else
+        echo $mhash
+    fi
 }
 
 # Start cgminer for tweaking settings.
@@ -182,18 +194,20 @@ function tuneThreadConcurrency
     maxTC=$(getDatum thread_concurrency max)
     stepTC=$(getDatum thread_concurrency step)
     currentTC=$minTC
-    lastTC=$currentTC
+    lastTC=0
 
     while sleep 1; do
-        echo "Attempting to start with TC $currentTC"
+        echo -n "Attempting to start with TC $currentTC"
         startCgMiner tc $currentTC
         active=0
 
         targetTime=$(getTargetTime)
         while sleep 1; do
+            echo -n "."
             if [[ $(getCurrentTime) -lt $targetTime ]]; then
-                if checkActive; then
-                    echo "cgminer starts with TC $currentTC"
+                rate=$(getHashRate)
+                if [[ $rate != $NO_START ]]; then
+                    echo " [OK]"
 
                     # Kill the cgminer process, and wait until it exits.
                     kill $! >/dev/null 2>&1
@@ -201,6 +215,8 @@ function tuneThreadConcurrency
                         sleep 1
                     done
                     active=1
+
+                    # Break from the sleep 1 while loop.
                     break;
                 fi
             else
@@ -219,6 +235,10 @@ function tuneThreadConcurrency
         fi
     done
 
+    # Tidy up, just in case.
+    killall cgminer
+
+    echo
     echo "TC: $lastTC"
 }
 
@@ -255,6 +275,8 @@ function main
     fi
 
     echo "cgminer install found at $CGMINER_DIR"
+    dateTime=`date +'%T on %x'`
+    echo -e "Commencing configuration at $dateTime.\n"
 
     # Parse the default parameters from the config file.
     parseParams
@@ -283,6 +305,9 @@ function main
 
 # Execute the main function.
 main
+
+# Tidy up dir on exit.
+mv *.bin data/bin_files/
 
 # Great success.
 exit $SUCCESS
